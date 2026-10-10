@@ -1,0 +1,18 @@
+auto_skip_references = true
+# Extra literal bibliography section names, in addition to built-in titles.
+# Do not add ambiguous headings such as Notes or Sources without checking the paper.
+reference_heading_aliases = []
+listen_port = 8890
+backend_port = 8891
+server_dir = '../server'
+# Empty means discover the existing official environment beneath server_dir.
+server_python = ''
+max_request_mb = 256
+max_pdf_mb = 128
+max_detector_pages = 2000
+detection_timeout_seconds = 30
+max_parallel_detections = 2
+backend_connect_timeout_seconds = 10
+backend_read_timeout_seconds = 3600
+# Automatic skip requires version/source fingerprints AND successful native output verification.
+validation_file = 'artifacts/compatibility.json'

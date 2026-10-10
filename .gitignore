@@ -1,0 +1,25 @@
+.venv/
+__pycache__/
+.pytest_cache/
+logs/
+artifacts/
+backups/
+.env
+.env.*
+!.env.example
+*.log
+*.pdf
+*.pem
+*.key
+# Local acceptance evidence can contain library item identifiers and machine details.
+docs/ACCEPTANCE.md
+*.sqlite
+*.sqlite-*
+*.db
+*.p12
+*.pfx
+*.zip
+*.bak
+credentials*.json
+secrets*.json
+config.local.*

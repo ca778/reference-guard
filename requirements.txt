@@ -1,0 +1,2 @@
+PyMuPDF==1.25.2
+aiohttp==3.14.4
