@@ -14,6 +14,8 @@ from yarl import URL
 
 from .compatibility import ROOT, auto_allowed
 from .config import load_config
+from .backend_adapter import CAPABILITY, FIELD
+from .selection import translation_ranges
 
 LOG = logging.getLogger('reference_guard')
 SESSION = web.AppKey('session', ClientSession)
@@ -47,7 +49,16 @@ async def run_detection(pdf: bytes, config: dict) -> dict:
             await process.wait()
 
 
-async def transform(data: dict, config: dict, enabled: bool, detector=run_detection) -> dict:
+async def transform(data: dict, config: dict, enabled: bool, detector=run_detection, route='/translate') -> dict:
+    if FIELD in data:
+        data = {k: v for k, v in data.items() if k != FIELD}
+    if route == '/crop':
+        LOG.info('Mode: CROP_ONLY; upstream cropping does not translate any pages')
+        return data
+    name = str(data.get('fileName', ''))
+    if route != '/translate' and any(s in name for s in ('.dual.pdf', '_dual.pdf', '.dual-cut.pdf', '-dual.pdf', '-dual-cut.pdf')):
+        LOG.info('Mode: EXISTING_DUAL; formatting only; existing translations cannot be undone')
+        return data
     try:
         manual = int(data.get('skipLastPages', 0)) > 0
     except (TypeError, ValueError):
@@ -69,6 +80,12 @@ async def transform(data: dict, config: dict, enabled: bool, detector=run_detect
             return data
         pdf = base64.b64decode(content, validate=True)
         result = await detector(pdf, config)
+        excluded = result.get('reference_pages', [])
+        if excluded and config.get('page_selection_supported'):
+            pages = translation_ranges(result['total_pages'], excluded)
+            LOG.info('Route: %s; Mode: AUTO_PAGES; Reference pages: %s; Translation pages: %s', route, excluded, pages)
+            return {**data, 'skipLastPages': 0, 'onlyIncludeTranslatedPage': False,
+                    FIELD: {'total': result['total_pages'], 'excluded': excluded}}
         count = result.get('skip_last_pages', 0)
         if count:
             LOG.info('Pure reference suffix: pages %s-%s', result['last_translatable_page'] + 1, result['total_pages'])
@@ -131,7 +148,7 @@ def create_app(config: dict, enabled: bool | None = None) -> web.Application:
                 yield chunk
         data = bounded_upload()
         modified = False
-        if request.method == 'POST' and request.path == '/translate':
+        if request.method == 'POST' and request.path in PROCESSING:
             raw = await request.read()
             data = raw
             if request.content_type == 'application/json' and not request.headers.get('Content-Encoding'):
@@ -139,7 +156,10 @@ def create_app(config: dict, enabled: bool | None = None) -> web.Application:
                     obj = json.loads(raw)
                     if isinstance(obj, dict):
                         async with detector_slots:
-                            changed = await transform(obj, config, enabled)
+                            async with session.get(backend + '/health') as health_response:
+                                capability = (await health_response.json()).get('referenceGuardCapability') if health_response.status == 200 else None
+                            runtime_config = {**config, 'page_selection_supported': capability == CAPABILITY}
+                            changed = await transform(obj, runtime_config, enabled, route=request.path)
                         if changed is not obj:
                             data = json.dumps(changed, ensure_ascii=False).encode()
                             modified = True

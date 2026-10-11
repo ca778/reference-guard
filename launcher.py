@@ -9,6 +9,7 @@ import sys
 import time
 import tomllib
 import urllib.request
+from pathlib import Path
 from reference_guard import __version__
 from reference_guard.compatibility import ROOT, auto_allowed, fingerprint
 from reference_guard.config import load_config
@@ -75,7 +76,8 @@ def main() -> int:
         for attempt in range(3):
             enabled, reason = auto_allowed(cfg)
             print(f'自动跳过：{enabled and not args.passthrough}；{reason}',flush=True)
-            server = subprocess.Popen([cfg['server_python'],'server.py','--host','127.0.0.1','--port',str(cfg['backend_port']),
+            entry = [str(ROOT/'backend_entry.py'),str(Path(cfg['server_dir'])/'server.py')] if enabled and not args.passthrough else ['server.py']
+            server = subprocess.Popen([cfg['server_python'],*entry,'--host','127.0.0.1','--port',str(cfg['backend_port']),
                 '--enable_mirror','False','--skip_install','True','--check_update',str(not args.no_update)],
                 cwd=cfg['server_dir'],env=env)
             deadline=time.monotonic()+300

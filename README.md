@@ -1,6 +1,6 @@
 # Reference Guard
 
-面向 Zotero PDF2zh 的独立本地代理：保守识别末尾的纯参考文献页，将页码选择转发给官方翻译引擎，并保留未翻译页面。
+面向 Zotero PDF2zh 的独立本地代理：保守识别纯参考文献页，将页码选择传给官方翻译引擎，并保留未翻译页面。支持参考文献后仍有附录的文档。
 
 这是独立扩展，不是官方插件或官方 Server 的替代品。检测失败时保留原始翻译请求。
 
@@ -52,8 +52,8 @@ pdf2zh/
 
 ## 检测规则与标题
 
-BODY、MIXED、UNKNOWN 都参与翻译。仅跳过确认连续到文档末尾的 REFERENCES_ONLY 页，永不跳过整个 PDF。
-混合页整页仍翻译，不做页内段落保护。扫描件、无标题、无法解释的文本，以及参考文献之后还有附录或其他正文时安全回退。
+BODY、MIXED、UNKNOWN 都参与翻译。只排除有标题与连续文献证据支持的 REFERENCES_ONLY 页，永不跳过整个 PDF。
+混合页整页仍翻译，不做页内段落保护。参考文献后的附录继续翻译；遇到未知页面或新正文后结束该文献段的连续性，不将后续含年份的正文误当参考文献。扫描件、无标题和无法解释的文本保留翻译。
 
 内置标题：References、Reference、Bibliography、Works Cited、Literature Cited、Reference List、List of References、Cited References、References Cited、Literature References、Cited Literature、Bibliographic References、Bibliography and References、References and Bibliography、参考文献、引用文献、文献目录。
 支持章节编号、大小写、多个空格及末尾句点/冒号。必须结合独立标题行、字体、坐标、文献条目、年份与跨页连续性，正文出现同名单词不触发。
@@ -70,9 +70,11 @@ UNKNOWN 不视为纯文献。HIGH 是规则证据等级，不是经统计校准�
 
 ## 请求与输出
 
-- 只自动处理 `pdf2zh_next` 的 `/translate` 请求。检测异常保留原请求。
+- `/translate`、`/compare`、`/crop-compare` 从原文开始翻译时执行相同的页码保护。检测异常保留原请求。
+- `/crop` 只裁剪，不调用翻译引擎。对已经翻译的双语附件做对照或裁剪，不会撤销原有翻译；需要从原文重新执行才能保护参考文献。
 - 手动 `skipLastPages > 0` 优先，连同 `onlyIncludeTranslatedPage` 原值保留。手动模式若只包含翻译页为 true，原引擎可能裁掉尾页，日志会显示该选项。
-- 自动识别成功才设置 skipLastPages，并强制 onlyIncludeTranslatedPage=false，其余配置保持原值。
+- 新启动器通过独立的内存适配器使用 `--pages` 支持中间文献段，例如 `1-10,15-27`；强制 onlyIncludeTranslatedPage=false。官方文件不改写。旧后端仅支持末尾 skipLastPages。
+- 四个入口均沿用原任务、附件下载及进度协议。裁剪采用保守版式判断：单栏整页处理；仅无跨中线文字且有可靠双栏证据时分栏，裁剪留白不移除文字。
 - 其他路由透明转发；SSE 与下载流式处理，支持 Range/HEAD，保留任务 ID 和同步/异步响应。
 - 因官方共享配置文件，处理任务串行提交；状态查询、SSE 和下载并行。长任务排队可能超过客户端自身超时。
 - 默认请求上限 256 MiB、待解析 PDF 128 MiB、2000 页、检测 30 秒。JSON/base64 请求需要有界缓存，下载和 SSE 使用流式背压。
@@ -84,8 +86,9 @@ UNKNOWN 不视为纯文献。HIGH 是规则证据等级，不是经统计校准�
 Mono、左右 Dual、交替页 Dual 的尾页内容、DOI 字符、尺寸和像素保留通过；Zotero 实际生成的 Mono/左右 Dual 附件也已核对。
 
 当前引擎在测试中丢失可点击 URI 链接注释，DOI 文本仍在。本扩展不进行链接注释修复。
-交替 Dual 的最终 Zotero 附件，以及裁剪/compare 衍生输出未单独验收。不能把这些模式宣称为全流程通过。
-实际 KGW 完整论文有后续补充正文，因此不跳页；人为裁切夹具只验证尾部策略，不替代完整论文结论。
+四路由输出验证与最终 Zotero 附件验收分开记录；原先的裁剪/compare 模式未验收，不能将旧验证推广到这些入口。
+0.2.0 已用 SiliconFlowFree 对独立真实论文夹具执行四入口验证，正文/附录翻译、参考文献原文与单栏排版通过；修改后的 Zotero UI 尚未重新执行。详见 [四入口修复验收](docs/FOUR_ROUTES.md)。
+旧版本遇到后续附录会关闭整份文档的跳页；0.2.0 改为只排除已确认的文献页，保留后续正文翻译。
 本机验收证据留在忽略的 artifacts/ 中，不分发真实科研论文。新环境需要独立重验。
 
 ## 更新、回退与备份
@@ -99,6 +102,7 @@ Mono、左右 Dual、交替页 Dual 的尾页内容、DOI 字符、尺寸和像�
 官方源码、包版本或协议发生变化时，门槛不匹配会明确关闭自动跳页。
 当前更新隔离通过源代码审计及隔离同步测试验证；未承诺对所有未来版本兼容。
 启动器不自动升级翻译环境，升级依赖需退出后按上游流程进行。
+内存适配器在官方启动块之前挂接选页和裁剪，官方升级逻辑仍执行。兼容性门槛不通过时启动原后端并明确关闭自动保护；可用 restore-original.bat 回到完全原生流程。Windows exe 引擎的中间页选择未验证，会明确拒绝该自动选页请求。
 
 ## 发布与隐私
 

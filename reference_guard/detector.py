@@ -57,6 +57,7 @@ class Detection:
     reason: str = ''
     detection_status: str = 'FALLBACK'
     pages: list[PageEvidence] = field(default_factory=list)
+    reference_pages: list[int] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -70,10 +71,13 @@ def detect(pdf: bytes, max_pages: int = 2000, extra_headings: Sequence[str] = ()
         result = Detection(len(doc), last_translatable_page=len(doc))
         running_counts: dict[str, int] = {}
         for page in doc:
+            page_heads = set()
             for b in page.get_text('blocks'):
                 t=b[4].strip()
-                if b[6]==0 and len(t)<120 and b[3]<page.rect.height*.10 and b[0]>page.rect.width*.25 and b[2]<page.rect.width*.75:
-                    running_counts[t]=running_counts.get(t,0)+1
+                if b[6]==0 and len(t)<120 and b[3]<page.rect.height*.10:
+                    page_heads.add(t)
+            for t in page_heads:
+                running_counts[t]=running_counts.get(t,0)+1
         running_heads={t for t,count in running_counts.items() if count>=3 and not heading.fullmatch(t)}
         active = False
         obstructed = False
@@ -88,7 +92,7 @@ def detect(pdf: bytes, max_pages: int = 2000, extra_headings: Sequence[str] = ()
                     x0, y0, x1, y1 = line['bbox']
                     # Ignore identified recurring heads and marginal folios, never arbitrary prose.
                     folio = text.isdigit() and len(text) <= 4 and (y1 < page.rect.height * .10 or y0 > page.rect.height * .90)
-                    running = text in running_heads and y1 < page.rect.height*.10 and x0 > page.rect.width*.25 and x1 < page.rect.width*.75
+                    running = text in running_heads and y1 < page.rect.height*.10
                     if not text or running or folio:
                         continue
                     lines.append((text, x0, y0, x1, y1, max(s['size'] for s in line['spans'])))
@@ -98,6 +102,7 @@ def detect(pdf: bytes, max_pages: int = 2000, extra_headings: Sequence[str] = ()
                 ev.classification, ev.reason = 'UNKNOWN', 'No reliable text; scan or blank page'
                 if active:
                     obstructed = True
+                    active = False
                 continue
             headings = [l for l in lines if heading.fullmatch(l[0])]
             # A real heading needs bibliographic evidence below it, in the same column.
@@ -128,6 +133,7 @@ def detect(pdf: bytes, max_pages: int = 2000, extra_headings: Sequence[str] = ()
                 (abs(l[1]-accepted[1]) < page.rect.width * .20 and l[2] > accepted[2])]
             if any(OTHER.match(l[0]) or NONREFERENCE.match(l[0]) for l in later):
                 obstructed = True
+                active = False
                 ev.reason = 'Non-reference section after reference heading'
                 continue
             before = []
@@ -146,7 +152,7 @@ def detect(pdf: bytes, max_pages: int = 2000, extra_headings: Sequence[str] = ()
                 if b[6] != 0:
                     continue
                 t = b[4].strip()
-                running = t in running_heads and b[3] < page.rect.height*.10 and b[0] > page.rect.width*.25 and b[2] < page.rect.width*.75
+                running = t in running_heads and b[3] < page.rect.height*.10
                 if running or (len(t) <= 4 and t.isdigit()):
                     continue
                 if heading.fullmatch(t):
@@ -156,11 +162,15 @@ def detect(pdf: bytes, max_pages: int = 2000, extra_headings: Sequence[str] = ()
                     suspicious.append(t)
             if before or BODY.search(text):
                 ev.classification, ev.reason = 'MIXED', 'Body content above/beside heading or explicit body prose'
+                if not accepted:
+                    active = False
             elif (strong or short_final) and not suspicious:
                 ev.classification, ev.reason = 'REFERENCES_ONLY', 'Heading continuity, bibliographic density, no unexplained prose'
+                result.reference_pages.append(index + 1)
             else:
                 ev.classification, ev.reason = 'UNKNOWN', 'Insufficient bibliographic evidence or unexplained prose'
                 obstructed = True
+                active = False
         if obstructed:
             result.reason = 'Ambiguous text/scan/other section after References: preserve original behavior'
             return result

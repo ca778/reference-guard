@@ -117,7 +117,13 @@ def test_streaming_protocol_and_concurrency():
                 for route in ['/crop','/compare','/crop-compare']:
                     raw=json.dumps(request_pdf()).encode()
                     async with client.post(base+route,data=raw,headers={'Content-Type':'application/json'}) as res:
-                        assert res.status==201 and (await res.json())['body'].encode()==raw
+                        received_body = json.loads((await res.json())['body'])
+                        assert res.status==201
+                        if route == '/crop':
+                            assert received_body == json.loads(raw)
+                        else:
+                            assert received_body['skipLastPages'] == 1
+                            assert received_body['onlyIncludeTranslatedPage'] is False
                 async with client.get(base+'/events') as res:
                     first=await asyncio.wait_for(res.content.readuntil(b'\n\n'),.2)
                     assert first==b'data: first\n\n'
